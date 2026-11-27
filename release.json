@@ -25,5 +25,8 @@
   "scope": "Version descriptor only. Runtime archive is private, not a clean redistributable installer or a complete machine backup.",
   "source_snapshot_complete_kernel": false,
   "source_snapshot": "first-party runtime plus historical kernel/native/initramfs inputs; not full reproducible firmware tree",
-  "uploaded": false
+  "uploaded": false,
+  "AI_assisted": true,
+  "original_content_license": "custom noncommercial; third-party licenses unchanged",
+  "packaging_revision": "public.1"
 }

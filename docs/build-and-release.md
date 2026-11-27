@@ -21,3 +21,7 @@
 5. 补完未验收项目后再把版本从 rc 改为稳定版。
 
 这里没有自动创建 GitHub 仓库、推送提交或上传网盘文件。
+
+## rc2 当前匹配输入补充
+
+`kernel/accepted.config` 更新为相机驱动移除后的当前运行配置；`src/native` 补充已用于匹配模块构建的 IRIS engine、stock data 和 Makefile。这些输入仍不等同于完整内核源码树/工具链/厂商固件的清洁重建验收。
