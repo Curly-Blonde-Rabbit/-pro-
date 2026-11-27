@@ -1,0 +1,35 @@
+#!/usr/bin/python3
+"""Bounded local health gates. --confirm is explicit; existence never means good."""
+import argparse,json,os,pathlib,subprocess,sys,time
+sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'lib/dlt-recovery'))
+from dlt_boot_state import Store,atomic
+def output(cmd):return subprocess.check_output(cmd,text=True,timeout=10).strip()
+def main():
+    a=argparse.ArgumentParser();a.add_argument('--confirm',action='store_true');args=a.parse_args()
+    assert os.geteuid()==0
+    role=json.loads(pathlib.Path('/etc/dlt-server/production-role.json').read_text())
+    slot=role['slot'];assert slot in ('system-a','system-b')
+    assert pathlib.Path('/etc/dlt-server/native-root-id').read_text().strip()==role['root_id']
+    rec=pathlib.Path('/run/dlt-local-recovery');layout=json.loads((rec/'opt/dlt-recovery/production-layout.json').read_text())
+    assert role['root_id']==layout['slots'][slot]['root_id'] and role['data_uuid']==layout['data_uuid']
+    root=json.loads(output(['findmnt','--json','--output','SOURCE,FSTYPE,UUID,TARGET','--target','/']))['filesystems'][0]
+    assert root['source'].startswith('/dev/loop') and root['uuid']==layout['slots'][slot]['filesystem_uuid']
+    data=json.loads(output(['findmnt','--json','--output','SOURCE,FSTYPE,UUID,TARGET','--target','/srv']))['filesystems'][0]
+    assert data['uuid']==role['data_uuid'] and 'loop' not in data['source']
+    services={s:output(['systemctl','is-active',s]) for s in ('ssh.service','dlt-oem-wlan.service','dlt-wifi-managed.service')}
+    assert all(v=='active' for v in services.values())
+    addresses=json.loads(output(['ip','-j','-4','addr','show','dev','wlan0']))
+    assert any(x.get('family')=='inet' and x.get('scope')=='global' for row in addresses for x in row.get('addr_info',[]))
+    assert float(pathlib.Path('/proc/uptime').read_text().split()[0])>=30
+    temp=int(pathlib.Path('/sys/class/power_supply/battery/temp').read_text());assert 0<temp<450
+    boot=pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    probe=pathlib.Path('/srv/system-state/health-write-probe.json');probe.parent.mkdir(mode=0o700,exist_ok=True)
+    atomic(probe,{'boot_id':boot,'slot':slot});assert json.loads(probe.read_text())['boot_id']==boot
+    state=Store(rec/'var/lib/dlt-recovery/boot-state');before=state.load()
+    assert (before['candidate']==slot and before['trial_boot']==boot) or (before['good']==slot and before['candidate'] is None)
+    r={'schema':1,'slot':slot,'boot_id':boot,'all_checked_gates_passed':True,'services':services,'battery_temp_tenths_c':temp,'confirmed':False,'power_charging_suspend_and_long_stability_accepted':False}
+    if args.confirm:
+        state.healthy(slot,boot)
+        r['confirmed']=True;atomic(rec/'var/lib/dlt-recovery/last-production-health.json',r)
+    print(json.dumps(r,sort_keys=True))
+if __name__=='__main__':main()

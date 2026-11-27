@@ -1,0 +1,70 @@
+#!/bin/sh
+set -eu
+STATE=/run/dlt-oem-wlan
+test -f "$STATE/started" || exit 0
+test "$(cat "$STATE/started")" = development-oem-wlan-stage6-20261125
+touch "$STATE/stopping"
+
+phase() {
+    echo "DLT_STOP_PHASE:$*"
+    printf '<6>DLT_STOP_PHASE:%s\n' "$*" >/dev/kmsg
+}
+wait_offline() {
+    target=$1
+    node=
+    for d in /sys/bus/msm_subsys/devices/*; do
+        test -r "$d/name" || continue
+        if test "$(cat "$d/name")" = "$target"; then node=$d; break; fi
+    done
+    test -n "$node"
+    for n in $(seq 1 20); do
+        state=$(cat "$node/state")
+        phase "$target:$state:$n"
+        if test "$state" = OFFLINE; then return 0; fi
+        sleep 1
+    done
+    phase "$target:OFFLINE_NOT_CONFIRMED"
+    return 1
+}
+echo STOP_UNLOADING_WLAN_BEFORE_MODEM_AND_ADSP
+wlan=$(modinfo -F name /vendor/lib/modules/qca_cld3_wlan.ko)
+case "$wlan" in ''|*[!a-zA-Z0-9_]*) exit 52;; esac
+if test -d "/sys/module/$wlan"; then rmmod "$wlan"; fi
+phase WLAN_MODULE_REMOVED
+
+# This minimal server runtime never owns an audio ADSP vote. Verify that no
+# unrelated audio loader appeared before releasing the modem/WLAN vote.
+if test -e /sys/kernel/boot_adsp/boot; then
+    phase UNEXPECTED_ADSP_LOADER_PRESENT_IN_MINIMAL_RUNTIME
+    exit 53
+fi
+adsp_node=$(cat "$STATE/adsp-sysfs-node")
+test "$(cat "$adsp_node/name")" = adsp
+test "$(cat "$adsp_node/state")" = "$(cat "$STATE/adsp-unrequested-state")"
+test "$(cat "$adsp_node/state")" != ONLINE
+phase ADSP_NEVER_REQUESTED_STATE_UNCHANGED
+test -s "$STATE/modem-vote.pid" || exit 0
+pid=$(cat "$STATE/modem-vote.pid")
+case "$pid" in ''|*[!0-9]*) exit 50;; esac
+test -d "/proc/$pid" || exit 0
+grep -q '/system.slice/dlt-oem-wlan.service' "/proc/$pid/cgroup"
+test "$(readlink "/proc/$pid/fd/9")" = /dev/subsys_modem
+echo STOP_RELEASING_MODEM_VOTE_WITH_HELPERS_STILL_ALIVE
+kill -TERM "$pid"
+released=no
+for n in $(seq 1 20); do
+    test -d "/proc/$pid" || { echo MODEM_VOTE_PROCESS_EXITED; released=yes; break; }
+    sleep 1
+done
+if test "$released" != yes; then echo MODEM_VOTE_RELEASE_TIMEOUT; exit 51; fi
+wait_offline modem
+phase MODEM_OFFLINE_CONFIRMED
+# Only unload modules actually recorded as owned by this runtime.
+echo STOP_REMOVING_ANY_REMAINING_OWNED_MODULES
+if test -s "$STATE/modules"; then
+    tac "$STATE/modules" | while read -r name; do
+        case "$name" in ''|*[!a-zA-Z0-9_]*) exit 52;; esac
+        if test -d "/sys/module/$name"; then rmmod "$name"; fi
+    done
+fi
+echo BOARD_DEPENDENCY_REVERSE_STOP_COMPLETED

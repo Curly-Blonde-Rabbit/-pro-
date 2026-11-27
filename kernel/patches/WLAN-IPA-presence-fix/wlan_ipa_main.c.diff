@@ -1,0 +1,13 @@
+--- original/qcacld-3.0/components/ipa/core/src/wlan_ipa_main.c
++++ target/qcacld-3.0/components/ipa/core/src/wlan_ipa_main.c
+@@ -29,8 +29,8 @@
+ 
+ bool ipa_check_hw_present(void)
+ {
+-	/* Check if ipa hw is enabled */
+-	if (qdf_ipa_uc_reg_rdyCB(NULL) != -EPERM) {
++	/* Query hardware identity without registering a NULL readiness callback. */
++	if (ipa_get_hw_type() != IPA_HW_None) {
+ 		g_ipa_hw_support = true;
+ 		return true;
+ 	} else {

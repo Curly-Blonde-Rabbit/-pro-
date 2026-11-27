@@ -1,0 +1,18 @@
+[Unit]
+Description=Restore phone-approved ordinary account UID/GID without rewriting maintenance access
+After=local-fs.target
+Before=ssh.service
+RequiresMountsFor=/srv/dlt-state /srv/dlt-device-users
+ConditionPathExists=/srv/dlt-state/device-access/registry.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /opt/dlt-device-access/access_identity_restore.py --apply
+TimeoutStartSec=60
+UMask=0077
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

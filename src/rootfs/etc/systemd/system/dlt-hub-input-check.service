@@ -1,0 +1,21 @@
+[Unit]
+Description=Inventory USB hub and HID input devices without reading input events
+After=systemd-udevd.service
+ConditionPathExists=/sys/bus/usb/devices
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/libexec/dlt-hub-input-check.py --output /run/dlt-hardware/hub-input.json
+RuntimeDirectory=dlt-hardware
+RuntimeDirectoryPreserve=yes
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/run/dlt-hardware
+TimeoutStartSec=15
+
+[Install]
+WantedBy=multi-user.target

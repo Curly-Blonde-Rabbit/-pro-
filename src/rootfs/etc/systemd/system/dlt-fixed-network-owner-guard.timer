@@ -1,0 +1,9 @@
+[Unit]
+Description=Recheck owner-only fixed-IP access
+[Timer]
+OnBootSec=20
+OnUnitInactiveSec=5
+AccuracySec=1
+Unit=dlt-fixed-network-owner-guard.service
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Bounded-test guard only; firmware charging protections remain untouched.
+while sleep 3; do
+    test -r /sys/class/power_supply/battery/temp || continue
+    t=$(cat /sys/class/power_supply/battery/temp)
+    case "$t" in ''|*[!0-9-]*) continue;; esac
+    if test "$t" -ge 450; then
+        echo "DLT staging battery threshold: $t" >/dev/kmsg
+        exec /bin/systemctl reboot
+    fi
+done

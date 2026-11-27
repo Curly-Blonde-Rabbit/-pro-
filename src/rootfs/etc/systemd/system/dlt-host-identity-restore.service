@@ -1,0 +1,18 @@
+[Unit]
+Description=Restore this phone's existing SSH identity and maintenance public key
+After=local-fs.target
+Before=dlt-ssh-hostkeys.service ssh.service
+RequiresMountsFor=/srv/dlt-state
+ConditionPathExists=/srv/dlt-state/host-identity/manifest.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /opt/dlt-device-access/host_identity_restore.py restore
+TimeoutStartSec=30
+UMask=0077
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

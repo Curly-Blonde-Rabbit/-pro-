@@ -1,0 +1,27 @@
+[Unit]
+Description=Owner fixed private IP overlay
+After=network.target dlt-wifi-managed.service
+RequiresMountsFor=/srv/dlt-state
+ConditionPathIsMountPoint=/srv
+StartLimitIntervalSec=300
+StartLimitBurst=3
+[Service]
+Type=simple
+User=root
+UMask=0077
+RuntimeDirectory=dlt-fixed-network
+RuntimeDirectoryMode=0700
+ExecCondition=/usr/bin/python3 -I /opt/dlt-system-console/console_fixed_network.py startup-check
+ExecStart=/usr/local/lib/dlt-fixed-network/tailscaled --config=/etc/dlt-fixed-network/daemon.json --state=/srv/dlt-state/fixed-network/tailscaled.state --socket=/run/dlt-fixed-network/tailscaled.sock --tun=tailscale0 --port=0 --no-logs-no-support
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+Nice=10
+MemoryMax=256M
+TasksMax=64
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/dlt-state/fixed-network /run/dlt-fixed-network
+[Install]
+WantedBy=multi-user.target

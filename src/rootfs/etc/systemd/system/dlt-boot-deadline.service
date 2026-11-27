@@ -1,0 +1,7 @@
+[Unit]
+Description=Recover an unconfirmed production boot locally
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dlt-auto-health --deadline
+TimeoutStartSec=60

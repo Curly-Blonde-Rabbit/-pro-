@@ -1,0 +1,46 @@
+--- original/step-chg-jeita.c
++++ target/step-chg-jeita.c
+@@ -467,13 +467,10 @@
+ 		*val = range[*new_index].value;
+ 	}
+ 
+-	if (threshold < range[0].low_threshold) {
+-		*new_index = 0;
+-		*val = range[*new_index].value;
+-	} else if (threshold > range[MAX_STEP_CHG_ENTRIES - 1].low_threshold) {
+-		*new_index = MAX_STEP_CHG_ENTRIES - 1;
+-		*val = range[*new_index].value;
+-	}
++	/* The search above already selects a valid entry and clips to the
++	 * last populated range. Do not override it with a zero-filled unused
++	 * slot when the profile has fewer than MAX_STEP_CHG_ENTRIES tuples.
++	 */
+ 
+ 	/*
+ 	 * If we don't have a current_index return this
+@@ -639,7 +636,7 @@
+ static int handle_jeita(struct step_chg_info *chip)
+ {
+ 	union power_supply_propval pval = {0, };
+-	int rc = 0, fcc_ua = 0, fv_uv = 0;
++	int rc = 0, fcc_ua = 0, fv_uv = 0, batt_temp;
+ 	u64 elapsed_us;
+ 
+ 	rc = power_supply_get_property(chip->batt_psy,
+@@ -678,6 +675,7 @@
+ 		return rc;
+ 	}
+ 
++	batt_temp = pval.intval;
+ 	rc = get_val(chip->jeita_fcc_config->fcc_cfg,
+ 			chip->jeita_fcc_config->param.hysteresis,
+ 			chip->jeita_fcc_index,
+@@ -733,7 +731,7 @@
+ 	}
+ 
+ 	pr_info("%s = %d FCC = %duA FV = %duV\n",
+-		chip->jeita_fcc_config->param.prop_name, pval.intval, fcc_ua, fv_uv);
++		chip->jeita_fcc_config->param.prop_name, batt_temp, fcc_ua, fv_uv);
+ 	/*
+ 	 * Suspend USB input path if battery voltage is above
+ 	 * JEITA VFLOAT threshold.

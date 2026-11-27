@@ -1,0 +1,107 @@
+--- D:\heisha2\display-calibration\iris-port\userspace-backup-E283\dlt_panel_calibration.py
++++ D:\heisha2\work\linux-foundation\dlt_panel_calibration.py
+@@ -1,13 +1,28 @@
+ #!/usr/bin/python3
+ """Bounded, standalone DSI calibration. No network or system control actions."""
+ import argparse, ctypes, fcntl, hashlib, json, mmap, os, pathlib, select
+-import signal, struct, time, traceback
++import errno, signal, struct, time, traceback
+ from rounded_panel_renderer import RoundedPanel, BUTTONS, hit_test
+ 
+ def ioc(fd, n, fmt, *v):
+     b = bytearray(struct.pack(fmt, *v))
+     fcntl.ioctl(fd, (3 << 30) | (len(b) << 16) | (ord('d') << 8) | n, b, True)
+     return struct.unpack(fmt, b)
++
++def submit_frame(fd, crtc, fb, ioctl=ioc, sleep=time.sleep):
++    """Commit changed pixels on a command-mode panel, not just the CPU mmap.
++
++    No event flag: this process does not consume the DRM event queue. Only
++    EBUSY is retried, at most 60 ms; a real transport error is never hidden.
++    """
++    for attempt in range(7):
++        try:
++            ioctl(fd, 0xb0, '<4IQ', crtc, fb, 0, 0, 0)
++            return
++        except OSError as exc:
++            if exc.errno != errno.EBUSY or attempt == 6:
++                raise
++            sleep(.01)
+ 
+ def save(p, v):
+     t = p.with_suffix('.tmp')
+@@ -52,7 +67,11 @@
+         self.scan_time = time.monotonic()
+         for p in pathlib.Path('/dev/input').glob('event*'):
+             if str(p) in [d['path'] for d in self.devices.values()]: continue
+-            fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
++            try:
++                fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
++            except OSError:
++                # Driver removal/rebind can race the input directory scan.
++                continue
+             axes = {}
+             for code in (0, 1, 53, 54):
+                 b = bytearray(24)
+@@ -63,9 +82,13 @@
+                 except OSError: pass
+             pair = (53,54) if 53 in axes and 54 in axes else (0,1)
+             if not all(c in axes for c in pair): os.close(fd); continue
+-            name = (pathlib.Path('/sys/class/input')/p.name/'device/name').read_text().strip()
++            try:
++                name = (pathlib.Path('/sys/class/input')/p.name/'device/name').read_text().strip()
++            except OSError:
++                os.close(fd); continue
+             self.devices[fd] = dict(path=str(p), name=name, axes=axes, pair=pair,
+-                                    x=None, y=None, slot=0, down=False, was=False, pending=b'')
++                                    x=None, y=None, slot=0, down=False, was=False,
++                                    pending=b'', quarantine=False)
+     def events(self):
+         self.scan(); result = []
+         ready = select.select(list(self.devices), [], [], 0)[0]
+@@ -73,10 +96,23 @@
+             d = self.devices[fd]
+             try: buf = d['pending'] + os.read(fd, 24*128)
+             except BlockingIOError: continue
++            except OSError as exc:
++                if exc.errno not in (errno.ENODEV, errno.EBADF, errno.ENXIO):
++                    raise
++                try: os.close(fd)
++                except OSError: pass
++                del self.devices[fd]; continue
+             if not buf: os.close(fd); del self.devices[fd]; continue
+             count = len(buf)//24; d['pending'] = buf[count*24:]
+             for i in range(count):
+                 _, _, typ, code, val = struct.unpack('llHHi', buf[i*24:i*24+24])
++                if typ == 0 and code == 3:  # SYN_DROPPED: no stale admin clicks.
++                    d.update(x=None,y=None,down=False,was=False,slot=0,quarantine=True)
++                    continue
++                if d['quarantine']:
++                    if (typ == 3 and code == 57 and val < 0) or (typ == 1 and code == 330 and not val):
++                        d['quarantine'] = False
++                    continue
+                 if typ == 3:
+                     if code == 47: d['slot'] = val
+                     if d['slot'] != 0: continue
+@@ -162,7 +198,7 @@
+         changed=True
+         actual=ioc(fd,0xa1,'<Q7I68s',0,0,crtc,0,0,0,0,0,b'\0'*68)
+         state.update(phase='display-active',framebuffer=fb,crtc_fb_readback=actual[3],
+-                     crtc_mode_valid=actual[7],inputs=touch.info())
++                     crtc_mode_valid=actual[7],inputs=touch.info(),frame_commits=1)
+         # Readback file is the actual RGB framebuffer, not a photograph of the OLED.
+         write_preview()
+         save(out/'status.json',state); print(json.dumps(state),flush=True)
+@@ -179,7 +215,11 @@
+                     if n is not None:
+                         state['hits'][n]+=1; state['physical_click_verified']=True
+                 with (out/'touch.jsonl').open('a') as f: f.write(json.dumps(e)+'\n')
+-            if changed_ui: draw();preview_dirty=True
++            if changed_ui:
++                draw()
++                submit_frame(fd,crtc,fb)
++                state['frame_commits']+=1
++                preview_dirty=True
+             if preview_dirty and time.monotonic()-last_preview>=2:
+                 write_preview();last_preview=time.monotonic();preview_dirty=False
+             if time.monotonic()-last_save>2:

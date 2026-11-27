@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.img
+*.ext4
+*.tar
+*.tar.gz
+*.zip
+*.private.*
+*.key
+*.pem
+.env
+.env.*
+id_ed25519*
+ssh_host_*
+authorized_keys
+tailscaled.state
+private*/

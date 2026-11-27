@@ -1,0 +1,13 @@
+[Unit]
+Description=Reconstruct Linux UTC from a validated Linux-owned RTC offset
+DefaultDependencies=no
+After=local-fs.target
+Before=systemd-timesyncd.service time-set.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dlt-clock bootstrap
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

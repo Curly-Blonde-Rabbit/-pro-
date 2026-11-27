@@ -1,0 +1,12 @@
+--- original/qca-wifi-host-cmn/hif/inc/hif.h
++++ target/qca-wifi-host-cmn/hif/inc/hif.h
+@@ -766,7 +766,8 @@
+ static inline
+ bool hif_get_ipa_present(void)
+ {
+-	if (ipa_uc_reg_rdyCB(NULL) != -EPERM)
++	/* Hardware identity query has no callback registration side effect. */
++	if (ipa_get_hw_type() != IPA_HW_None)
+ 		return true;
+ 	else
+ 		return false;

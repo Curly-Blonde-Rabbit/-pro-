@@ -1,0 +1,22 @@
+[Unit]
+Description=Reconnect saved Wi-Fi and paired Bluetooth without replacing active peers
+After=dlt-wifi-managed.service ssh.service
+RequiresMountsFor=/srv/dlt-state
+ConditionPathExists=/srv/dlt-state/connection-policy.json
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/dlt-system-console/console_connection_auto.py
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=5
+Nice=15
+UMask=0077
+NoNewPrivileges=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

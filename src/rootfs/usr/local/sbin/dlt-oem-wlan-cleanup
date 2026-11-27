@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+STATE=/run/dlt-oem-wlan
+test -f "$STATE/started" || exit 0
+test "$(cat "$STATE/started")" = development-oem-wlan-stage6-20261125
+cleanup_error=0
+rm -f /run/dlt/wlan-ready
+if test -f "$STATE/hotplug-before" && test "$(cat /proc/sys/kernel/hotplug)" = /usr/local/sbin/dlt-firmware-helper; then
+    cat "$STATE/hotplug-before" >/proc/sys/kernel/hotplug
+fi
+if mountpoint -q /run/dlt-persist-readonly; then umount /run/dlt-persist-readonly; fi
+# ExecStopPost runs after systemd has terminated all remaining helpers.
+if test -s "$STATE/NV-before.sha256"; then
+    sha256sum -c "$STATE/NV-before.sha256" >"$STATE/NV-stop-hash-check.log" 2>&1 || cleanup_error=1
+    if test "$cleanup_error" = 0; then printf '<6>DLT_STOP_AUDIT:PHYSICAL_NV_HASHES_UNCHANGED\n' >/dev/kmsg; fi
+fi
+if test -s "$STATE/modules"; then
+    tac "$STATE/modules" | while read -r name; do
+        case "$name" in ''|*[!a-zA-Z0-9_]*) exit 40;; esac
+        if test -d "/sys/module/$name"; then echo "MODULE_REMAINS_AFTER_ORDERED_STOP:$name" >&2; exit 46; fi
+    done
+fi
+if test -s "$STATE/loops"; then
+    while read -r loop file; do
+        case "$loop" in /dev/loop*) ;; *) exit 41;; esac
+        number=$(basename "$loop" | sed 's/^loop//')
+        case "$number" in ''|*[!0-9]*) exit 42;; esac
+        case "$file" in /run/native-nv/modemst1.img|/run/native-nv/modemst2.img|/run/native-nv/fsg.img|/run/native-nv/fsc.img) ;; *) exit 43;; esac
+        actual=$(losetup --noheadings --output BACK-FILE "$loop" | sed 's/^[[:space:]]*//')
+        test "$actual" = "$file"
+        name=$(basename "$file" .img)
+        link="/dev/block/bootdevice/by-name/$name"
+        if test -L "$link"; then
+            test "$(readlink "$link")" = "$loop"
+            rm "$link"
+        fi
+        if losetup --detach "$loop"; then rm -f "$file"; else cleanup_error=1; fi
+    done <"$STATE/loops"
+fi
+if test -s "$STATE/physical-flags"; then
+    while read -r src original; do
+        case "$src" in /dev/disk/by-partlabel/modemst1|/dev/disk/by-partlabel/modemst2|/dev/disk/by-partlabel/fsg|/dev/disk/by-partlabel/fsc) ;; *) exit 44;; esac
+        case "$original" in 0) blockdev --setrw "$src";; 1) blockdev --setro "$src";; *) exit 45;; esac
+        test "$(blockdev --getro "$src")" = "$original"
+    done <"$STATE/physical-flags"
+fi
+if test "$cleanup_error" = 0; then
+    rm -f "$STATE/started"
+    echo DLT_OEM_WLAN_STOP_CLEANUP_FINISHED
+    printf '<6>DLT_STOP_AUDIT:RAM_NV_DETACHED_FLAGS_AND_HOTPLUG_RESTORED\n' >/dev/kmsg
+    printf '<6>DLT_OEM_WLAN_STOP_CLEANUP_FINISHED\n' >/dev/kmsg
+fi
+exit "$cleanup_error"
+

@@ -1,0 +1,43 @@
+--- original/rmnet_ipa.c
++++ target/rmnet_ipa.c
+@@ -2620,16 +2620,30 @@
+ 
+ 	IPAWANINFO("rmnet_ipa started deinitialization\n");
+ 	mutex_lock(&rmnet_ipa3_ctx->pipe_handle_guard);
+-	ret = ipa3_teardown_sys_pipe(rmnet_ipa3_ctx->ipa3_to_apps_hdl);
+-	if (ret < 0)
+-		IPAWANERR("Failed to teardown IPA->APPS pipe\n");
+-	else
+-		rmnet_ipa3_ctx->ipa3_to_apps_hdl = -1;
+-	ret = ipa3_teardown_sys_pipe(rmnet_ipa3_ctx->apps_to_ipa3_hdl);
+-	if (ret < 0)
+-		IPAWANERR("Failed to teardown APPS->IPA pipe\n");
+-	else
+-		rmnet_ipa3_ctx->apps_to_ipa3_hdl = -1;
++	/* -1 is the existing explicit unallocated-handle sentinel. */
++	IPAWANINFO("DLT_IPA_PIPE_STATE:IPA->APPS handle=%u\n",
++		rmnet_ipa3_ctx->ipa3_to_apps_hdl);
++	if (rmnet_ipa3_ctx->ipa3_to_apps_hdl != (u32)-1) {
++		ret = ipa3_teardown_sys_pipe(rmnet_ipa3_ctx->ipa3_to_apps_hdl);
++		if (ret < 0)
++			IPAWANERR("Failed to teardown IPA->APPS pipe\n");
++		else
++			rmnet_ipa3_ctx->ipa3_to_apps_hdl = -1;
++	} else {
++		IPAWANINFO("DLT_IPA_PIPE_UNALLOCATED_SKIP:IPA->APPS\n");
++	}
++	/* -1 is the existing explicit unallocated-handle sentinel. */
++	IPAWANINFO("DLT_IPA_PIPE_STATE:APPS->IPA handle=%u\n",
++		rmnet_ipa3_ctx->apps_to_ipa3_hdl);
++	if (rmnet_ipa3_ctx->apps_to_ipa3_hdl != (u32)-1) {
++		ret = ipa3_teardown_sys_pipe(rmnet_ipa3_ctx->apps_to_ipa3_hdl);
++		if (ret < 0)
++			IPAWANERR("Failed to teardown APPS->IPA pipe\n");
++		else
++			rmnet_ipa3_ctx->apps_to_ipa3_hdl = -1;
++	} else {
++		IPAWANINFO("DLT_IPA_PIPE_UNALLOCATED_SKIP:APPS->IPA\n");
++	}
+ 	if (ipa3_rmnet_res.ipa_napi_enable)
+ 		netif_napi_del(&(rmnet_ipa3_ctx->wwan_priv->napi));
+ 	mutex_unlock(&rmnet_ipa3_ctx->pipe_handle_guard);

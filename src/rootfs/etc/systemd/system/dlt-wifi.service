@@ -1,0 +1,21 @@
+[Unit]
+Description=BlackShark Wi-Fi association after board bring-up
+Requires=dlt-oem-wlan.service
+After=dlt-oem-wlan.service
+ConditionPathExists=/etc/dlt-server/wifi.conf
+StartLimitIntervalSec=120
+# Initial activation plus three supervised association cycles within 120 s.
+StartLimitBurst=5
+
+[Service]
+Type=simple
+RuntimeDirectory=wpa_supplicant
+ExecStart=/sbin/wpa_supplicant -i wlan0 -D nl80211 -c /etc/dlt-server/wifi.conf
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+

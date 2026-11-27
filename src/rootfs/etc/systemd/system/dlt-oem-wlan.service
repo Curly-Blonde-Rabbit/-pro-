@@ -1,0 +1,23 @@
+[Unit]
+Description=BlackShark development WLAN runtime with verified IPA and nonpartitioned RAM NV
+After=systemd-udev-settle.service systemd-udevd.service systemd-networkd.service ssh.service
+Wants=systemd-udev-settle.service
+Before=dlt-wifi.service
+ConditionKernelVersion=4.14.83-dlt-dev1
+RefuseManualStop=no
+
+[Service]
+Type=notify
+NotifyAccess=all
+ExecStart=/usr/local/sbin/dlt-oem-wlan-run
+ExecStop=/usr/local/sbin/dlt-oem-wlan-stop
+ExecStopPost=/usr/local/sbin/dlt-oem-wlan-cleanup
+TimeoutStartSec=180
+TimeoutStopSec=100
+KillMode=control-group
+Restart=no
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+

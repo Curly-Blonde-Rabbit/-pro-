@@ -1,0 +1,172 @@
+#!/bin/sh
+# Stock-kernel board bring-up. Physical NV is read-only; rmt_storage gets RAM copies.
+set -eu
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+STATE=/run/dlt-oem-wlan
+test "$(uname -r)" = 4.14.83-dlt-dev1
+test -f /etc/detached-hardware-runtime-marker
+test "$(cat /etc/detached-hardware-runtime-marker)" = darklighter-oem-runtime-development-20261125
+mkdir -p "$STATE" /run/dlt /run/native-nv /dev/block/bootdevice/by-name
+chmod 700 "$STATE" /run/native-nv
+test ! -f "$STATE/started" || { echo STATE_NOT_CLEAN; exit 20; }
+printf '%s\n' 'development-oem-wlan-stage6-20261125' >"$STATE/started"
+rm -f "$STATE/stopping"
+: >"$STATE/loops"; : >"$STATE/physical-flags"; : >"$STATE/modules"
+: >"$STATE/NV-before.sha256"
+sha256sum -c /etc/dlt-server/development-modules.sha256
+test "$(modinfo -F vermagic /vendor/lib/modules/qca_cld3_wlan.ko | awk '{print $1}')" = "$(uname -r)"
+echo DEVELOPMENT_MODULE_VERSION_GUARD_PASSED
+echo STAGE_CONTROL_NODES
+# Create only known control devices if udev has not created them yet.
+for u in /sys/dev/char/*/uevent; do
+    test -r "$u" || continue
+    MAJOR= MINOR= DEVNAME=
+    while IFS='=' read -r k v; do
+        case "$k" in MAJOR) MAJOR=$v;; MINOR) MINOR=$v;; DEVNAME) DEVNAME=$v;; esac
+    done <"$u"
+    case "$DEVNAME" in uio0)
+        test "$(cat /sys/class/uio/uio0/name)" = rmtfs
+        test "$(cat /sys/class/uio/uio0/dev)" = "$MAJOR:$MINOR"
+        if test ! -c /dev/uio0; then mknod /dev/uio0 c "$MAJOR" "$MINOR"; chmod 600 /dev/uio0; fi
+        echo RMT_UIO_NODE_READY:$MAJOR:$MINOR;;
+    ipa|vndbinder|subsys_modem)
+        if test ! -c "/dev/$DEVNAME"; then mknod "/dev/$DEVNAME" c "$MAJOR" "$MINOR"; chmod 600 "/dev/$DEVNAME"; fi;;
+    esac
+done
+mkdir -p /run/dlt-persist-readonly /mnt/vendor/persist /data/vendor/wifi /data/vendor/tombstones/rfs
+echo STAGE_READONLY_PERSIST_TO_RAM
+mount -t ext4 -o ro,noload,nodev,nosuid /dev/disk/by-partlabel/persist /run/dlt-persist-readonly
+for d in rfs hlos_rfs; do
+    if test -d "/run/dlt-persist-readonly/$d"; then cp -a "/run/dlt-persist-readonly/$d" /mnt/vendor/persist/; fi
+done
+if test -f /run/dlt-persist-readonly/wlan_mac.bin; then cp -a /run/dlt-persist-readonly/wlan_mac.bin /mnt/vendor/persist/; fi
+umount /run/dlt-persist-readonly
+for d in modem lpass tn slpi cdsp; do mkdir -p "/data/vendor/tombstones/rfs/$d"; done
+chown -R 2903:2903 /mnt/vendor/persist/rfs /mnt/vendor/persist/hlos_rfs /data/vendor/tombstones/rfs
+chmod 755 /mnt/vendor/persist
+chown 1010:1010 /data/vendor/wifi
+chmod 770 /data/vendor/wifi
+mkdir -p /lib/firmware
+for f in /vendor/firmware_mnt/image/*; do
+    test -e "$f" || continue
+    if test ! -e "/lib/firmware/$(basename "$f")"; then ln -s "$f" "/lib/firmware/$(basename "$f")"; fi
+done
+# IPA firmware lives in /vendor/firmware, not firmware_mnt/image.
+for name in ipa_fws.mdt ipa_fws.b00 ipa_fws.b01 ipa_fws.b02 ipa_fws.b03 ipa_fws.b04; do
+    test -r "/vendor/firmware/$name"
+    target="/lib/firmware/$name"
+    if test ! -e "$target"; then ln -s "/vendor/firmware/$name" "$target"; fi
+    test "$(sha256sum "$target" | awk '{print $1}')" = "$(sha256sum "/vendor/firmware/$name" | awk '{print $1}')"
+done
+test -e /lib/firmware/wlan || ln -s /vendor/firmware/wlan /lib/firmware/wlan
+cat /proc/sys/kernel/hotplug >"$STATE/hotplug-before"
+printf '%s\n' /usr/local/sbin/dlt-firmware-helper >/proc/sys/kernel/hotplug
+echo STAGE_FIRMWARE_FALLBACK_INSTALLED
+export LD_LIBRARY_PATH=/vendor/lib64:/system/lib64:/system/lib64/vndk-28:/system/lib64/vndk-sp-28
+/vendor/bin/qrtr-ns -f >"$STATE/qrtr-ns.log" 2>&1 & QRTR=$!
+/vendor/bin/tftp_server >"$STATE/tftp_server.log" 2>&1 & TFTP=$!
+/vendor/bin/pd-mapper >"$STATE/pd-mapper.log" 2>&1 & PDMAP=$!
+sleep 2
+test "$(cat /sys/module/loop/parameters/max_part)" = 0
+echo STAGE_RAM_ONLY_NV_LOOPS
+for name in modemst1 modemst2 fsg fsc; do
+    src="/dev/disk/by-partlabel/$name"
+    test -b "$src"
+    original=$(blockdev --getro "$src")
+    printf '%s %s\n' "$src" "$original" >>"$STATE/physical-flags"
+    blockdev --setro "$src"
+    test "$(blockdev --getro "$src")" = 1
+    cp "$src" "/run/native-nv/$name.img"
+    chmod 600 "/run/native-nv/$name.img"
+    test "$(sha256sum "$src" | awk '{print $1}')" = "$(sha256sum "/run/native-nv/$name.img" | awk '{print $1}')"
+    # Record physical hashes only; never print NV contents.
+    sha256sum "$src" >>"$STATE/NV-before.sha256"
+    loop=$(losetup --find --show "/run/native-nv/$name.img")
+    printf '%s %s\n' "$loop" "/run/native-nv/$name.img" >>"$STATE/loops"
+    test "$(cat /sys/class/block/$(basename "$loop")/loop/partscan)" = 0
+    test ! -e "/dev/block/bootdevice/by-name/$name"
+    ln -s "$loop" "/dev/block/bootdevice/by-name/$name"
+done
+cat /proc/self/limits >"$STATE/limits-before-rmt.log"
+cursor=$(journalctl -b -n 1 --show-cursor --no-pager | sed -n 's/^-- cursor: //p')
+test -n "$cursor"
+/usr/bin/strace -ff -tt -s 120 -e trace=openat,mmap,mlockall,prlimit64,setrlimit,capset,setuid,setgid,ioctl,readlink,access,newfstatat -o "$STATE/rmt-strace" /vendor/bin/rmt_storage >"$STATE/rmt_storage.log" 2>&1 & RMT=$!
+sleep 2
+if journalctl -b --after-cursor="$cursor" --no-pager -g 'Mmap Failed for rmts' | grep -q 'Mmap Failed'; then
+    echo RMT_MAPPING_FAILED_ABORT_BEFORE_MODEM
+    exit 27
+fi
+kill -0 "$RMT"
+rmtpid=$(pgrep -P "$RMT" -x rmt_storage)
+test -n "$rmtpid"
+grep '/dev/uio0' "/proc/$rmtpid/maps" >"$STATE/rmt-uio-mapping.log" || { echo RMT_UIO_MAPPING_NOT_CONFIRMED; exit 28; }
+echo RMT_UIO_MAPPING_CONFIRMED
+echo STAGE_IPA_INIT
+test -c /dev/ipa
+mkdir -p /run/dlt-board-global
+if test -f /run/dlt-board-global/ipa-ready; then
+    test "$(cat /run/dlt-board-global/ipa-ready)" = "$(cat /proc/sys/kernel/random/boot_id)"
+    dmesg | grep -q 'IPA driver initialization was successful.'
+    echo IPA_ALREADY_READY_THIS_BOOT
+else
+    printf 1 >/dev/ipa
+    ready=no
+    for n in $(seq 1 25); do
+        if dmesg | grep -q 'IPA driver initialization was successful.'; then ready=yes; break; fi
+        sleep 1
+    done
+    test "$ready" = yes || { echo IPA_FIRMWARE_NOT_READY_ABORT; exit 29; }
+    cat /proc/sys/kernel/random/boot_id >/run/dlt-board-global/ipa-ready
+fi
+echo STAGE_IPA_READY_VERIFIED
+test -r /vendor/etc/selinux/vndservice_contexts
+mkdir -p /dev/socket
+/vendor/bin/vndservicemanager /dev/vndbinder >"$STATE/vndservicemanager.log" 2>&1 & VND=$!
+sleep 1
+kill -0 "$VND"
+# Omit the Android peripheral-manager binder daemon: it aborted in Ubuntu and
+# is not required by this reduced WLAN path. Its absence is tested separately.
+/vendor/bin/cnss-daemon -n -l >"$STATE/cnss-daemon.log" 2>&1 & CNSS=$!
+echo STAGE_MINIMAL_WLAN_NO_AUDIO_ADSP_REQUEST
+# The WLAN module declares no audio module dependency. Validate this reduced
+# runtime on hardware rather than assume every OEM audio boot step is required.
+for d in /sys/bus/msm_subsys/devices/*; do
+    if test -r "$d/name" && test "$(cat "$d/name")" = adsp; then
+        cat "$d/state" >"$STATE/adsp-unrequested-state"
+        printf '%s\n' "$d" >"$STATE/adsp-sysfs-node"
+    fi
+done
+test -s "$STATE/adsp-unrequested-state"
+test ! -e /sys/kernel/boot_adsp/boot
+test -c /dev/subsys_modem
+echo STAGE_MODEM_WLAN_PD_VOTE
+(
+    exec 9<>/dev/subsys_modem
+    echo MODEM_WLAN_PD_VOTE_HELD
+    exec /bin/sleep infinity
+) >"$STATE/modem-vote.log" 2>&1 & MODEM=$!
+printf '%s\n' "$MODEM" >"$STATE/modem-vote.pid"
+sleep 5
+echo STAGE_WLAN_MODULE_INSERT
+insmod /vendor/lib/modules/qca_cld3_wlan.ko
+echo STAGE_WLAN_MODULE_INSERT_RETURNED
+modinfo -F name /vendor/lib/modules/qca_cld3_wlan.ko >>"$STATE/modules"
+unset LD_LIBRARY_PATH
+for n in $(seq 1 30); do
+    test ! -d /sys/class/net/wlan0 || break
+    sleep 2
+done
+test -d /sys/class/net/wlan0
+ip link set wlan0 up
+for pid in "$QRTR" "$TFTP" "$PDMAP" "$RMT" "$VND" "$CNSS" "$MODEM"; do kill -0 "$pid"; done
+printf '%s\n' 'stock-wlan-interface-ready' >/run/dlt/wlan-ready
+systemd-notify --ready --status='Stock WLAN interface ready; helpers and RAM NV active'
+echo DLT_STOCK_WLAN_READY
+# Remain the parent of the tracked helpers; systemd owns this control group.
+while sleep 3; do
+    if test -e "$STATE/stopping"; then continue; fi
+    for pid in "$QRTR" "$TFTP" "$PDMAP" "$RMT" "$VND" "$CNSS" "$MODEM"; do
+        kill -0 "$pid" || { echo OEM_HELPER_EXITED; exit 30; }
+    done
+done
+

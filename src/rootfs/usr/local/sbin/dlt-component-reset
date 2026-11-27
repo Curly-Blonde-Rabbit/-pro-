@@ -1,0 +1,55 @@
+#!/usr/bin/python3
+"""Allowlisted, non-destructive configuration reset. No global reboot command."""
+import argparse
+import datetime
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import uuid
+
+
+def main():
+    a = argparse.ArgumentParser()
+    a.add_argument('component', choices=('wifi', 'clock'))
+    a.add_argument('--apply', action='store_true')
+    args = a.parse_args()
+    if os.geteuid() != 0:
+        raise RuntimeError('root administration required')
+    rootid = pathlib.Path('/etc/dlt-server/native-root-id').read_text().strip()
+    if not rootid.startswith('dlt-linux-stage1-'):
+        raise RuntimeError('Not the owned Linux staging root')
+    src = pathlib.Path('/srv/dlt-state/wifi') if args.component == 'wifi' else pathlib.Path('/var/lib/dlt-clock')
+    unit = 'dlt-wifi-managed.service' if args.component == 'wifi' else 'dlt-clock-capture.timer'
+    receipt = {'component': args.component, 'path': str(src), 'service': unit,
+               'apply': args.apply, 'system_reboot_requested': False,
+               'meaning': 'wifi goes offline and preserves old versions; clock requires fresh synchronization'}
+    if not args.apply:
+        print(json.dumps(receipt)); return
+    # Only a private, fixed path may be renamed; no arbitrary deletion or traversal.
+    if src.is_symlink() or any(p.is_symlink() for p in src.parents):
+        raise RuntimeError('Symlink configuration path')
+    subprocess.run(['systemctl', 'stop', unit], check=True)
+    if args.component == 'clock':
+        subprocess.run(['systemctl', 'stop', 'dlt-clock-capture.service'], check=True)
+    backup = pathlib.Path('/var/lib/dlt-recovery/component-backups')
+    backup.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(backup, 0o700)
+    dest = backup/(args.component+'-'+uuid.uuid4().hex)
+    if src.exists():
+        src.rename(dest)
+        receipt['backup'] = str(dest)
+    src.mkdir(parents=True, mode=0o700, exist_ok=True)
+    os.chmod(src, 0o700)
+    if args.component == 'clock':
+        subprocess.run(['/usr/local/sbin/dlt-clock', 'capture'], check=True)
+        subprocess.run(['systemctl', 'start', unit], check=True)
+    # Wi-Fi intentionally remains offline after a true factory reset; USB SSH stays.
+    receipt['undo'] = 'Stop '+unit+', rename the fresh directory aside, rename backup to '+str(src)+', then start '+unit
+    receipt['boot_id'] = pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    print(json.dumps(receipt))
+
+
+if __name__ == '__main__':
+    main()

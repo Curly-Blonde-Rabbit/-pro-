@@ -1,0 +1,12 @@
+--- original/ipa_uc_wdi.c
++++ target/ipa_uc_wdi.c
+@@ -2763,7 +2763,8 @@
+ 	int result = 0;
+ 
+ 	if (inout == NULL) {
+-		IPAERR("bad parm. inout=%pK ", inout);
++		IPAERR("bad parm. inout=%pK DLT_IPA_NULL_READY_CALLER=%pS\n",
++			inout, __builtin_return_address(0));
+ 		return -EINVAL;
+ 	}
+ 

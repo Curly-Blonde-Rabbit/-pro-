@@ -1,0 +1,104 @@
+--- original/smb5-lib.c
++++ target/smb5-lib.c
+@@ -2755,11 +2755,44 @@
+ }
+ 
+ #ifdef CONFIG_THERMAL
++/* Legacy Darklighter DT supplies the common FCC table, not per-charger
++ * Xiaomi thermal tables. Preserve the existing non-CONFIG_THERMAL semantics
++ * instead of dereferencing an absent per-charger array. No limits invented.
++ */
++static int smblib_legacy_thermal_charging(struct smb_charger *chg)
++{
++	int level = chg->system_temp_level;
++	int rc, next;
++
++	if (!chg->thermal_mitigation || chg->thermal_levels <= 0 ||
++	    level < 0 || level >= chg->thermal_levels)
++		return -EINVAL;
++	if (level >= chg->thermal_levels - 1)
++		return vote(chg->chg_disable_votable, THERMAL_DAEMON_VOTER,
++			    true, 0);
++	if (!level) {
++		rc = vote(chg->usb_icl_votable, THERMAL_DAEMON_VOTER,
++			  false, 0);
++		next = vote(chg->fcc_votable, THERMAL_DAEMON_VOTER,
++			    false, 0);
++		return rc < 0 ? rc : next;
++	}
++	return vote(chg->fcc_votable, THERMAL_DAEMON_VOTER, true,
++		    chg->thermal_mitigation[level]);
++}
++
+ static int smblib_therm_charging(struct smb_charger *chg)
+ {
+ 	int thermal_icl_ua = 0;
+ 	int thermal_fcc_ua = 0;
+ 	int rc;
++
++	if (chg->thermal_mitigation && !chg->thermal_mitigation_dcp &&
++	    !chg->thermal_mitigation_pd_base && !chg->thermal_mitigation_qc2 &&
++	    !chg->thermal_fcc_qc3_cp && !chg->thermal_fcc_qc3_classb_cp &&
++	    !chg->thermal_fcc_qc3_normal && !chg->thermal_fcc_pps_cp &&
++	    !chg->thermal_mitigation_icl)
++		return smblib_legacy_thermal_charging(chg);
+ 
+ 	if (chg->system_temp_level >= MAX_TEMP_LEVEL)
+ 		return 0;
+@@ -2922,7 +2955,7 @@
+ 	vote(chg->chg_disable_votable, THERMAL_DAEMON_VOTER, false, 0);
+ 
+ #ifdef CONFIG_THERMAL
+-	smblib_therm_charging(chg);
++	return smblib_therm_charging(chg);
+ #else
+ 	if (chg->system_temp_level == 0)
+ 		return vote(chg->fcc_votable, THERMAL_DAEMON_VOTER, false, 0);
+--- original/smb5-lib.h
++++ target/smb5-lib.h
+@@ -541,9 +541,9 @@
+ 	int 		*thermal_mitigation_bpp_qc3;
+ 	int 		*thermal_mitigation_bpp_qc2;
+ 	int 		*thermal_mitigation_bpp;
+-#else
++#endif
++	/* Legacy common FCC table, also supported with CONFIG_THERMAL. */
+ 	int			*thermal_mitigation;
+-#endif
+ 	int			dcp_icl_ua;
+ 	int			fake_capacity;
+ 	int			fake_batt_status;
+--- original/qpnp-smb5.c
++++ target/qpnp-smb5.c
+@@ -750,8 +750,17 @@
+ 			return rc;
+ 		}
+ 	}
+-#else
+-	if (of_find_property(node, "qcom,thermal-mitigation", &byte_len)) {
++#endif
++	if (
++#ifdef CONFIG_THERMAL
++	    !chg->thermal_mitigation_dcp && !chg->thermal_mitigation_qc2 &&
++	    !chg->thermal_mitigation_pd_base && !chg->thermal_mitigation_icl &&
++	    !chg->thermal_fcc_qc3_normal && !chg->thermal_fcc_qc3_cp &&
++	    !chg->thermal_fcc_qc3_classb_cp && !chg->thermal_fcc_pps_cp &&
++#endif
++	    of_find_property(node, "qcom,thermal-mitigation", &byte_len)) {
++		if (byte_len < 2 * sizeof(u32) || byte_len % sizeof(u32))
++			return -EINVAL;
+ 		chg->thermal_mitigation = devm_kzalloc(chg->dev, byte_len,
+ 			GFP_KERNEL);
+ 
+@@ -768,8 +777,9 @@
+ 				"Couldn't read threm limits rc = %d\n", rc);
+ 			return rc;
+ 		}
+-	}
+-#endif
++		dev_info(chg->dev, "DLT legacy FCC thermal table: %d levels\n",
++			 chg->thermal_levels);
++	}
+ 	rc = of_property_read_u32(node, "qcom,charger-temp-max",
+ 			&chg->charger_temp_max);
+ 	if (rc < 0)

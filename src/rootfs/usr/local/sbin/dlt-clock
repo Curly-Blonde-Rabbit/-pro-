@@ -1,0 +1,139 @@
+#!/usr/bin/python3
+"""Linux-owned RTC-to-UTC checkpoint. Never writes the phone's hardware RTC.
+
+Checksums detect corruption, not a malicious editor. RTC rollback is degraded,
+not silently treated as accurate time. Network synchronization remains separate.
+"""
+import argparse
+import hashlib
+import json
+import math
+import os
+import pathlib
+import subprocess
+import time
+
+MIN_EPOCH = 1704067200
+MAX_EPOCH = 4102444800
+MAX_RTC_DELTA = 5 * 366 * 86400
+
+
+def encoded(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+
+def atomic(path, value):
+    path = pathlib.Path(path)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".new")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(json.dumps(value, indent=2).encode() + b"\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def rtc(root):
+    base = pathlib.Path(root)
+    n = int((base / "since_epoch").read_text().strip())
+    name = (base / "name").read_text().strip()
+    if not 0 <= n < MAX_EPOCH or not name:
+        raise ValueError("Invalid RTC observation")
+    return n, name
+
+
+def checked(obj):
+    p = obj["payload"]
+    if hashlib.sha256(encoded(p)).hexdigest() != obj["sha256"]:
+        raise ValueError("Checkpoint checksum mismatch")
+    if p["schema"] != 1 or p["source"] not in ("authenticated-admin", "systemd-ntp"):
+        raise ValueError("Checkpoint schema/source mismatch")
+    if not math.isfinite(p["epoch"]) or not MIN_EPOCH <= p["epoch"] <= MAX_EPOCH:
+        raise ValueError("Checkpoint UTC outside supported bounds")
+    if not isinstance(p["rtc"], int) or not 0 <= p["rtc"] < MAX_EPOCH:
+        raise ValueError("Invalid checkpoint RTC")
+    if not isinstance(p["rtc_name"], str) or not p["rtc_name"]:
+        raise ValueError("Missing RTC identity")
+    return p
+
+
+def select(state, raw, name):
+    errors = []
+    for filename in ("checkpoint.json", "checkpoint.good.json"):
+        path = pathlib.Path(state) / filename
+        try:
+            p = checked(json.loads(path.read_text()))
+            if name != p["rtc_name"]:
+                raise ValueError("RTC identity changed")
+            delta = raw - p["rtc"]
+            if not 0 <= delta <= MAX_RTC_DELTA:
+                raise ValueError("RTC reset/rollback or excessive gap; online sync required")
+            return p["epoch"] + delta, filename, errors
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            errors.append({"file": filename, "error": str(e)})
+    return None, None, errors
+
+
+def store(state, epoch, raw, name, source):
+    if not math.isfinite(epoch) or not MIN_EPOCH <= epoch <= MAX_EPOCH:
+        raise ValueError("Seed UTC outside supported bounds")
+    p = {"schema": 1, "epoch": epoch, "rtc": raw, "rtc_name": name, "source": source}
+    obj = {"payload": p, "sha256": hashlib.sha256(encoded(p)).hexdigest()}
+    # Independent last-known-good copy also tolerates a truncated primary file.
+    atomic(pathlib.Path(state) / "checkpoint.good.json", obj)
+    atomic(pathlib.Path(state) / "checkpoint.json", obj)
+    return obj
+
+
+def synchronized():
+    p = subprocess.run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
+                       capture_output=True, text=True, timeout=8)
+    return p.returncode == 0 and p.stdout.strip() == "yes"
+
+
+def main():
+    a = argparse.ArgumentParser()
+    a.add_argument("action", choices=("bootstrap", "capture", "seed", "status"))
+    a.add_argument("--state", default="/var/lib/dlt-clock")
+    a.add_argument("--rtc", default="/sys/class/rtc/rtc0")
+    a.add_argument("--epoch", type=float)
+    a.add_argument("--dry-run", action="store_true")
+    args = a.parse_args()
+    raw, name = rtc(args.rtc)
+    result = {"action": args.action, "rtc": raw, "rtc_name": name,
+              "before_epoch": time.time(), "hardware_RTC_written": False}
+    if args.action in ("bootstrap", "status"):
+        epoch, selected, errors = select(args.state, raw, name)
+        result.update(reconstructed_epoch=epoch, selected=selected, errors=errors,
+                      quality="rtc-offset-estimate" if epoch else "needs-online-sync")
+        if args.action == "bootstrap" and epoch and not args.dry_run:
+            time.clock_settime(time.CLOCK_REALTIME, epoch)
+            result["system_clock_set"] = True
+    else:
+        if args.action == "capture":
+            if not synchronized():
+                result.update(saved=False, reason="NTP is not synchronized; checkpoint unchanged")
+                print(json.dumps(result))
+                return
+            epoch, source = time.time(), "systemd-ntp"
+        else:
+            if args.epoch is None:
+                a.error("seed requires --epoch supplied through authenticated administration")
+            epoch, source = args.epoch, "authenticated-admin"
+        if not args.dry_run:
+            if args.action == "seed":
+                time.clock_settime(time.CLOCK_REALTIME, epoch)
+            result["checkpoint"] = store(args.state, epoch, raw, name, source)
+            result["saved"] = True
+    result["after_epoch"] = time.time()
+    print(json.dumps(result))
+
+
+if __name__ == "__main__":
+    main()

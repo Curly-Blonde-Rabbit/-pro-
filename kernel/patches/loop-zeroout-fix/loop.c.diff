@@ -1,0 +1,16 @@
+--- original/drivers/block/loop.c
++++ fixed/drivers/block/loop.c
+@@ -423,7 +423,12 @@
+ 	 * useful information.
+ 	 */
+ 	struct file *file = lo->lo_backing_file;
+-	int mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
++	/* Zeroing is not discard: the backing filesystem may support
++	 * ZERO_RANGE but not PUNCH_HOLE. Preserve allocation for zeroout.
++	 */
++	int mode = FALLOC_FL_KEEP_SIZE |
++		(req_op(rq) == REQ_OP_WRITE_ZEROES ?
++		 FALLOC_FL_ZERO_RANGE : FALLOC_FL_PUNCH_HOLE);
+ 	int ret;
+ 
+ 	if ((!file->f_op->fallocate) || lo->lo_encrypt_key_size) {

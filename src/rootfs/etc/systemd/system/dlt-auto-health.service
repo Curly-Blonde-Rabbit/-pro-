@@ -1,0 +1,12 @@
+[Unit]
+Description=Confirm every Linux boot using local identity and network health
+After=ssh.service dlt-wifi-managed.service dlt-recovery-wifi.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/dlt-auto-health
+Restart=on-failure
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target

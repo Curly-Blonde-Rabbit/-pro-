@@ -1,0 +1,10 @@
+[Unit]
+Description=Bound the production boot health window
+
+[Timer]
+OnBootSec=210
+AccuracySec=1
+Unit=dlt-boot-deadline.service
+
+[Install]
+WantedBy=timers.target

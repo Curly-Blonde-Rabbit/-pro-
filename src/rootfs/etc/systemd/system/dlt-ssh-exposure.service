@@ -1,0 +1,16 @@
+[Unit]
+Description=Phone controlled network SSH gate, keep USB maintenance
+After=local-fs.target
+Before=ssh.service
+RequiresMountsFor=/srv
+ConditionPathExists=/opt/dlt-system-console/console_ssh_exposure.py
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /opt/dlt-system-console/console_ssh_exposure.py apply-saved
+RemainAfterExit=yes
+TimeoutStartSec=25
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=Checkpoint RTC offset only after actual NTP synchronization
+After=systemd-timesyncd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dlt-clock capture

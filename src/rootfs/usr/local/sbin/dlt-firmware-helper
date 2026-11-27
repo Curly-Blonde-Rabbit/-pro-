@@ -1,0 +1,5 @@
+#!/bin/sh
+# Only firmware fallback requests use mdev; Ubuntu udev keeps normal device events.
+test "$SUBSYSTEM" = firmware || exit 0
+test "$ACTION" = add || exit 0
+exec /dlt/bin/busybox mdev

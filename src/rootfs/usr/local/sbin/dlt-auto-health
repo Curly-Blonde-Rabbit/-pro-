@@ -1,0 +1,66 @@
+#!/usr/bin/python3
+"""Every-boot bounded production lease; recovery waits locally, never reboot-loops."""
+import argparse,json,pathlib,subprocess,sys,time
+
+REC=pathlib.Path('/run/dlt-local-recovery') if pathlib.Path('/run/dlt-local-recovery/opt/dlt-recovery/production-layout.json').exists() else pathlib.Path('/')
+sys.path.insert(0,str(REC/'usr/local/lib/dlt-recovery'))
+from dlt_boot_state import Store,atomic
+STATE=Store(REC/'var/lib/dlt-recovery/boot-state')
+BOOT=pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+ROLE=pathlib.Path('/etc/dlt-server/production-role.json')
+SLOT=json.loads(ROLE.read_text())['slot'] if ROLE.exists() else 'recovery'
+
+def run(cmd):
+    p=subprocess.run(cmd,capture_output=True,text=True,timeout=25)
+    if p.returncode:raise RuntimeError((p.stderr or p.stdout)[-1200:])
+    return p.stdout.strip()
+
+def record(name,obj):
+    atomic(REC/('var/lib/dlt-recovery/'+name),dict(obj,boot_id=BOOT,slot=SLOT))
+
+def physical_success():
+    # A temporary Fastboot boot from Android A must never confirm B.
+    args=pathlib.Path('/proc/cmdline').read_text().split()
+    if 'androidboot.slot_suffix=_b' not in args:return {'skipped':'temporary-or-other-physical-slot'}
+    helper=REC/'usr/local/sbin/qbootctl-dlt'
+    result=run([str(helper),'-m','b'])
+    status=run([str(helper)])
+    if 'SLOT _b:' not in status or 'Successful  : 1' not in status.split('SLOT _b:',1)[1]:
+        raise RuntimeError('Physical B success readback failed')
+    return {'mark':result,'readback':status}
+
+def health():
+    if SLOT!='recovery':
+        return json.loads(run([str(REC/'usr/local/sbin/dlt-health-confirm'),'--confirm']))
+    # Recovery network uses its own validated factory copies, not production /srv.
+    run(['systemctl','is-active','ssh.service','dlt-recovery-wifi.service'])
+    addresses=json.loads(run(['ip','-j','-4','addr','show','dev','wlan0']))
+    if not any(x.get('scope')=='global' for row in addresses for x in row.get('addr_info',[])):
+        raise RuntimeError('Recovery is waiting for a local Wi-Fi address')
+    if float(pathlib.Path('/proc/uptime').read_text().split()[0])<30:
+        raise RuntimeError('Minimum uptime not reached')
+    STATE.healthy('recovery',BOOT)
+    return {'confirmed':True,'independent_recovery_network':True}
+
+def main():
+    a=argparse.ArgumentParser();a.add_argument('--deadline',action='store_true');args=a.parse_args()
+    if args.deadline:
+        state=STATE.load()
+        if state['boot_id']==BOOT and state['boot_slot']==SLOT and state['boot_healthy']:
+            record('boot-deadline.json',{'action':'healthy-no-reboot'});return
+        if SLOT=='recovery':
+            record('boot-deadline.json',{'action':'stay-in-recovery-wait-for-network'});return
+        record('boot-deadline.json',{'action':'production-unhealthy-local-recovery-reboot'})
+        STATE.fail(SLOT);STATE.recovery()
+        run(['systemctl','--no-block','reboot']);return
+    end=time.monotonic()+180
+    while True:
+        try:
+            result=health();result['physical_boot_success']=physical_success()
+            record('auto-boot-health.json',dict(result,passed=True));print(json.dumps(result),flush=True);return
+        except Exception as e:
+            record('auto-boot-health.json',{'passed':False,'error':str(e)[-1600:]})
+            if SLOT!='recovery' and time.monotonic()>=end:raise
+            time.sleep(5 if SLOT!='recovery' else 20)
+
+if __name__=='__main__':main()

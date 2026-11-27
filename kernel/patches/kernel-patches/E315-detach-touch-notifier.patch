@@ -1,0 +1,20 @@
+--- a/drivers/gpu/drm/msm/msm_atomic.c
++++ b/drivers/gpu/drm/msm/msm_atomic.c
+@@ -246,7 +246,7 @@
+ 		DRM_DEBUG_ATOMIC("disabling [ENCODER:%d:%s]\n",
+ 				 encoder->base.id, encoder->name);
+ 
+-		if (connector->state->crtc &&
++		if (!connector->state->crtc ||
+ 			connector->state->crtc->state->active_changed) {
+ 			blank = MSM_DRM_BLANK_POWERDOWN;
+ 			notifier_data.data = &blank;
+@@ -269,7 +269,7 @@
+ 			funcs->dpms(encoder, DRM_MODE_DPMS_OFF);
+ 
+ 		drm_bridge_post_disable(encoder->bridge);
+-		if (connector->state->crtc &&
++		if (!connector->state->crtc ||
+ 			connector->state->crtc->state->active_changed) {
+ 			DRM_DEBUG_ATOMIC("Notify blank\n");
+ 			msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK,

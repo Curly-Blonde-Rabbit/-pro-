@@ -1,0 +1,18 @@
+#!/usr/bin/python3 -I
+"""Fixed root operation dispatcher; no shell and no device-grant entry point."""
+import json,os,sys
+sys.path.insert(0,'/opt/dlt-device-access')
+try:
+    from device_access import Store
+    if os.geteuid()!=0 or len(sys.argv)!=3:raise PermissionError('invalid session')
+    role,blob=sys.argv[1:]
+    if (role,os.environ.get('SUDO_USER'))!=('join','dltjoin'):raise PermissionError('wrong account')
+    data=sys.stdin.buffer.read(4097)
+    if len(data)>4096:raise ValueError('oversize request')
+    v=json.loads(data)
+    if set(v)!={'command','source'} or not isinstance(v['command'],str) or len(v['command'])>256:raise ValueError('invalid request')
+    if not v['command'].startswith('request '):raise ValueError('Usage: ssh -i YOUR_KEY dltjoin@PHONE "request DEVICE_NAME"')
+    result=Store().request(blob,v['command'][8:],v['source'])
+    print(json.dumps(result,ensure_ascii=False))
+except Exception as exc:
+    print(json.dumps({'error':str(exc)[:200]},ensure_ascii=False));raise SystemExit(1)

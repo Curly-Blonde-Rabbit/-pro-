@@ -1,0 +1,10 @@
+[Unit]
+Description=Battery temperature guard for first persistent Linux tests
+After=basic.target
+
+[Service]
+ExecStart=/usr/local/sbin/dlt-stage-battery-guard
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,130 @@
+#!/bin/busybox sh
+# BlackShark DLT-A0 diagnostic boot only. No Android deletion; only the identified Linux staging root may be mounted.
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export HOME=/root
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+if mount -t devtmpfs -o mode=0755,nosuid devtmpfs /dev; then
+    echo DLT_DEVFS_KIND:devtmpfs
+else
+    mount -t tmpfs -o mode=0755,nosuid tmpfs /dev
+    echo DLT_DEVFS_KIND:static-tmpfs-fallback
+fi
+mkdir -p /dev/pts /dev/disk/by-partlabel
+test -e /dev/console || mknod /dev/console c 5 1
+test -e /dev/null || mknod /dev/null c 1 3
+test -e /dev/zero || mknod /dev/zero c 1 5
+test -e /dev/random || mknod /dev/random c 1 8
+test -e /dev/urandom || mknod /dev/urandom c 1 9
+test -e /dev/tty || mknod /dev/tty c 5 0
+test -e /dev/kmsg || mknod /dev/kmsg c 1 11
+chmod 666 /dev/null /dev/zero /dev/random /dev/urandom /dev/tty
+mount -t devpts -o mode=0620,ptmxmode=0666 devpts /dev/pts
+test -e /dev/ptmx || ln -s /dev/pts/ptmx /dev/ptmx
+mount -t tmpfs -o mode=0755,nosuid tmpfs /run
+mkdir -p /run/native-debug /var/log
+exec >/run/native-debug/boot.log 2>&1
+echo NATIVE_DEBUG_INIT_STARTED
+uname -a
+echo 'Native diagnostic initramfs; disks are not mounted; automatic reboot in 900 seconds.'
+echo 'Use USB-only key authentication. This is not the final Ubuntu/Docker system.'
+cat /proc/kmsg >/run/native-debug/kernel.log 2>&1 &
+(
+    sleep 900
+    echo 'Diagnostic timeout: rebooting to existing Android' >/dev/kmsg
+    reboot -f
+) &
+DLT_TIMEOUT_PID=$!
+# Use only the battery sensor whose units were observed on this exact device.
+(
+    while sleep 3; do
+        if test -r /sys/class/power_supply/battery/temp; then
+            t=$(cat /sys/class/power_supply/battery/temp)
+            case "$t" in ''|*[!0-9-]*) continue;; esac
+            if test "$t" -ge 450; then
+                echo "Battery threshold reached: $t; reboot" >/dev/kmsg
+                reboot -f
+            fi
+        fi
+    done
+) &
+DLT_THERMAL_PID=$!
+# The stock fallback still needs explicit block nodes; devtmpfs nodes are reused. nodes manually.
+for u in /sys/dev/block/*/uevent; do
+    test -r "$u" || continue
+    MAJOR= MINOR= DEVNAME= PARTNAME=
+    while IFS='=' read -r k v; do
+        case "$k" in MAJOR) MAJOR=$v;; MINOR) MINOR=$v;; DEVNAME) DEVNAME=$v;; PARTNAME) PARTNAME=$v;; esac
+    done < "$u"
+    case "$DEVNAME" in ''|*/*) continue;; esac
+    case "$MAJOR:$MINOR" in *[!0-9:]*|:) continue;; esac
+    test -b "/dev/$DEVNAME" || mknod "/dev/$DEVNAME" b "$MAJOR" "$MINOR"
+    if test -n "$PARTNAME"; then
+        case "$PARTNAME" in *[!a-zA-Z0-9_-]*) continue;; esac
+        test -e "/dev/disk/by-partlabel/$PARTNAME" || ln -s "/dev/$DEVNAME" "/dev/disk/by-partlabel/$PARTNAME"
+    fi
+done
+ip link set lo up
+mkdir -p /sys/kernel/config
+mount -t configfs configfs /sys/kernel/config
+G=/sys/kernel/config/usb_gadget/native_debug
+mkdir -p "$G"
+echo 0x18d1 > "$G/idVendor"
+echo 0x4ee3 > "$G/idProduct"
+echo 0x0200 > "$G/bcdUSB"
+echo 0x0100 > "$G/bcdDevice"
+echo 0xEF > "$G/bDeviceClass"
+echo 0x02 > "$G/bDeviceSubClass"
+echo 0x01 > "$G/bDeviceProtocol"
+mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409"
+echo DLT-NATIVE-DEBUG > "$G/strings/0x409/serialnumber"
+echo NativeLinuxDebug > "$G/strings/0x409/manufacturer"
+echo BlackShark2Pro-USB-Debug > "$G/strings/0x409/product"
+echo USB-only-SSH > "$G/configs/c.1/strings/0x409/configuration"
+echo 250 > "$G/configs/c.1/MaxPower"
+mkdir -p "$G/functions/rndis.usb0"
+echo 1 > "$G/os_desc/use"
+echo 0xcd > "$G/os_desc/b_vendor_code"
+echo MSFT100 > "$G/os_desc/qw_sign"
+echo RNDIS > "$G/functions/rndis.usb0/os_desc/interface.rndis/compatible_id"
+echo 5162001 > "$G/functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id"
+ln -s "$G/functions/rndis.usb0" "$G/configs/c.1/rndis.usb0"
+ln -s "$G/configs/c.1" "$G/os_desc/c.1"
+echo a600000.dwc3 > "$G/UDC"
+USB_IF=
+for n in 1 2 3 4 5 6 7 8 9 10; do
+    for iface in rndis0 usb0; do
+        if test -d "/sys/class/net/$iface"; then USB_IF=$iface; break; fi
+    done
+    test -n "$USB_IF" && break
+    sleep 1
+done
+if test -n "$USB_IF"; then
+    ip addr add 172.31.255.1/30 dev "$USB_IF"
+    ip link set "$USB_IF" up
+    echo "USB_INTERFACE_CREATED=$USB_IF"
+    /usr/sbin/dropbear -F -E -s -j -k -p 172.31.255.1:22 -r /etc/dropbear/dropbear_ed25519_host_key -P /run/dropbear.pid &
+else
+    echo USB_INTERFACE_NOT_CREATED
+fi
+/sbin/native-probe
+echo NATIVE_DEBUG_READY
+. /sbin/dlt-production-handoff.sh
+. /sbin/dlt-ramroot-handoff.sh
+# Local controller selects a verified system image or the independent recovery.
+sleep 3
+if /sbin/dlt-production-prepare.sh; then
+    dlt_production_handoff || echo LOCAL_DISPATCH_HANDOFF_FAILED_RESCUE_REMAINS
+fi
+while sleep 1; do
+    if test -f /run/dlt-persistent/request; then
+        dlt_persistent_handoff || echo PERSISTENT_HANDOFF_FAILED_RESCUE_REMAINS
+    fi
+    if test -f /run/dlt-ramroot/request && test ! -e /run/dlt-ramroot/handoff-failed; then
+        dlt_ramroot_handoff || {
+            mkdir -p /run/dlt-ramroot
+            touch /run/dlt-ramroot/handoff-failed
+            echo RAMROOT_HANDOFF_ABORTED_STAYING_IN_DIAGNOSTIC
+        }
+    fi
+done

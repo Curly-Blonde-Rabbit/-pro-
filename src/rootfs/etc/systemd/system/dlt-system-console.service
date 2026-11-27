@@ -1,0 +1,31 @@
+[Unit]
+Description=BlackShark local recovery console display
+After=ssh.service dlt-wifi-managed.service dlt-auto-health.service
+ConditionPathExists=/dev/dri/card0
+ConditionPathExists=/opt/dlt-system-console/manifest.json
+StartLimitIntervalSec=300
+StartLimitBurst=2
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=root
+WorkingDirectory=/opt/dlt-system-console
+ExecStart=/usr/bin/python3 /opt/dlt-system-console/resident_console.py
+ExecStopPost=/usr/bin/python3 -I /opt/dlt-system-console/console_display_lifecycle.py --restore
+TimeoutStartSec=90
+TimeoutStopSec=45
+WatchdogSec=60
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+KillMode=control-group
+Nice=10
+OOMScoreAdjust=500
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dlt-system-console
+
+[Install]
+WantedBy=multi-user.target
