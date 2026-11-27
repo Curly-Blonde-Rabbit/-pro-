@@ -28,5 +28,9 @@
   "uploaded": false,
   "AI_assisted": true,
   "original_content_license": "custom noncommercial; third-party licenses unchanged",
-  "packaging_revision": "public.1"
+  "packaging_revision": "public.2",
+  "installer_candidate": "install-candidate.1",
+  "installer_payload_assembled": true,
+  "installer_file_images_tested": true,
+  "installer_hardware_installation_tested": false
 }

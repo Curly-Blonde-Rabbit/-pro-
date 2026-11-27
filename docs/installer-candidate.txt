@@ -1,0 +1,60 @@
+﻿黑鲨2 Pro 原生Linux服务器——完整安装候选包
+版本：v1.0.0-rc2 / install-candidate.1
+
+这不是1MiB源码ZIP。本包包含约363MiB的干净Ubuntu ARM64系统模板、约48MiB的启动模板、救援/映射工具、首次身份初始化与Windows安装脚本、源代码和校验清单。A/B和机内救援镜像在安装时针对新用户生成，不预置发布者私钥或Wi-Fi。
+
+【重要状态】
+文件镜像生成、文件系统检查、身份清理、控制台169项哈希及隔离测试已有真实记录。
+本打包版本尚未在一台独立目标手机上完成“从Fastboot安装→首次启动→持久启动→故障回退”的整体验收，因此标记安装候选版，不冒充已验收稳定刷机包。
+默认命令只校验本地文件。候选安装必须同时显式指定安装、清除目标和接受未验收候选的三个参数。当前工程手机没有为了打包而重刷。
+
+【适用条件】
+- 黑鲨2 Pro DLT-A0 / Darklighter，128GB对应的精确存储布局。
+- 当前安装器只接受4KiB GPT与白名单分区：ramdump 116733718528字节、system_a/system_b各3221225472字节、vendor_a/vendor_b各1073741824字节。
+- 不是其他手机/存储型号通用包。原厂GPT若标签或尺寸不同会停止，不自动改GPT或猜分区。
+- BL已解锁，vbmeta_a和vbmeta_b已经满足verification-disabled条件。本安装器不解锁、锁回BL或修改vbmeta。
+- 建议12GiB内存型号；安装过程使用RAM建立根系统，首次Wi-Fi凭据由新用户在自己电脑输入。
+- Windows 10/11，Python 3.10或更新、OpenSSH客户端、Android platform-tools，以及正确Fastboot/RNDIS驱动；管理员终端。platform-tools可放在本目录同名子目录或加入PATH。
+- 电脑至少4GiB备份空间；另行完整备份目标手机所需数据。随包脚本只备份boot_a/boot_b/system_b/vbmeta，不备份即将被清除的完整主池。旧系统的数据和vendor分区不会仅靠这几份备份自动恢复。
+
+【先验证，不接手机也能执行】
+python tools\install.py --verify
+或双击 Verify.cmd。
+
+【安装候选版的显式执行方式】
+先手动将要安装的新目标手机置于Fastboot，并用 fastboot devices 得到它自己的序列号。
+管理员终端进入本包目录后执行：
+python tools\install.py --install --erase-linux-targets --allow-unvalidated-install --serial <目标手机序列号> --workspace D:\BlackShark-Install-Private
+
+<目标手机序列号>是目标手机的实际值，不使用项目作者的序列号。
+workspace必须是全新的目录，里面会生成新用户私钥、Wi-Fi配置、个性化启动镜像和分区备份，不要公开上传这个目录。
+执行安装会格式化白名单线性主池及替换system_b救援分区，清除对应原数据。每个阶段都有产品/分区/挂载/哈希检查；无参数不执行任何刷写。
+
+【安装流程】
+1. 本地检查构件哈希；Fastboot检查机型与解锁状态；生成新用户密钥。
+2. 临时启动该用户的RAM安装环境，只在USB地址172.31.255.1提供密钥SSH。
+3. 检查GPT/挂载/AVB前置条件，备份boot及旧救援分区并校验。
+4. 在RAM中生成三份新的3GiB文件系统：Linux A、Linux B、机内救援，使用本次安装的新身份。
+5. 明确清除主池后写入A/B/数据目录，救援最后写入；按哈希回读。
+6. 临时启动新服务器，通过本地健康检查后先提交boot_b；B启动确认后才镜像到boot_a。
+7. 新电脑USB地址在172.31.255.2/30；不改电脑默认网关、DNS或Wi-Fi。
+
+【恢复与访问】
+- 工作目录 progress.json 保留最后完成阶段；遇到异常先保留该目录，不反复执行清除安装。
+- 使用自己的 owner_ed25519 与 server_known_hosts 连接 ops@172.31.255.1；ops保留本机维护sudo。
+- 网络SSH和虚拟网络默认不继承原作者授权。Tailscale需新用户自己登录并建立自己的来源规则。
+- 使用恢复工具先校验：python tools\restore_boot.py --workspace D:\BlackShark-Install-Private
+- 如需还原备份boot/救援：在Fastboot下显式加 --apply --serial <目标手机序列号> --active-slot a。
+- 恢复工具不会重建已擦除的主池、业务数据或Android。若要恢复原厂系统，仍需该目标机自己的完整固件与数据备份。
+- 电脑USB配置还原：powershell -NoProfile -ExecutionPolicy Bypass -File tools\usb_link.ps1 -Workspace D:\BlackShark-Install-Private -Restore
+
+【已知未完成】
+本安装候选包的整机安装/冷启动验收、另一台设备验证、全部硬件和长期稳定性、一键工厂重置及真实项目部署尚未完成。1Panel未初始化，蓝牙不因此自动变为已适配。不能将文件生成检查写成整机安装成功。
+
+【AI与授权】
+本工程大量使用AI辅助，可能存在代码错误、设计不足、兼容/稳定/安全问题；已通过测试不覆盖所有设备和场景。欢迎报告可复现问题。
+作者可独立授权的原创部分仅限非商业使用；Linux/GPL/第三方内容继续保持原许可。见LICENSE、LICENSES与THIRD_PARTY_NOTICES.md。
+厂商硬件运行文件与发行版包保留其各自权利；源码输入和运行配置在sources/。源码存在不等于逐字节可重现构建已验收。
+
+仓库：https://github.com/Curly-Blonde-Rabbit/-pro-
+网盘链接待分享后补入仓库。

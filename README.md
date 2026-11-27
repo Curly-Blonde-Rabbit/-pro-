@@ -63,3 +63,9 @@ python3 -m unittest discover -s tests -v
 **私人恢复集不能原样作为公开网盘镜像或 GitHub Release 上传。** 公开整机镜像需要经过独立的清理、首次启动身份生成和另一台设备安装验证。本候选版尚不附带通过验收的通用全自动安装器。原机私人镜像与恢复集不在公开分发范围。
 
 详见 [存储架构](docs/storage.md)、[恢复方法](docs/recovery.md)、[验收状态](docs/acceptance.md) 和 [构建发布](docs/build-and-release.md)。
+
+## 完整系统安装候选包
+
+已制作 `install-candidate.1` 的完整构件包，包含Ubuntu根系统、无原机密钥的启动模板、A/B/机内救援生成与安装工具，而不是1MiB源码压缩包。网盘下载链接待作者上传后补入。
+
+**它仍是安装候选版：完成了文件镜像生成、文件系统检查、离线身份清理和隔离SSH认证测试，尚未完成另一台目标手机从Fastboot安装到持久启动的整体验收。** 默认仅验证文件，实际候选安装有明确的额外参数门禁。支持范围、擦除/备份边界和操作步骤见 [安装说明](docs/installer-candidate.txt)，对应 [安装器源码](installer-src/README.md)。
