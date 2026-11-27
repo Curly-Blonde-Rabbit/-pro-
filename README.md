@@ -17,6 +17,22 @@
 
 Linux 内核、内核派生代码、第三方依赖及其他已有许可证的内容，继续遵循各自原许可证；本条非商业限制不覆盖这些第三方许可授予的权利。详见 [项目许可](LICENSE)、[许可证适用范围](LICENSES/README.md) 与 [第三方说明](THIRD_PARTY_NOTICES.md)。本项目属于带非商业限制的源码公开项目，不将这份自定义条款表述为 OSI 开源许可证。
 
+## 系统安装包下载
+
+**版本：`v1.0.0-rc2 / install-candidate.1`（完整系统安装候选包，不是源码 ZIP）。**
+
+- **[123 云盘下载](https://1832518705.share.123pan.cn/123pan/Be3vTd-muTah)**
+- **[夸克网盘下载](https://pan.quark.cn/s/cb8cbe78ef3a)**
+
+文件：`blackshark2pro-linux-v1.0.0-rc2-install-candidate.1.zip`，**572,723,212 字节，约 546.19 MiB**。
+
+SHA-256：
+```text
+8c125c0f83cf461d47d8ad9d59821f2c1fdb077f8218db8ea837149e3a982e10
+```
+
+**仅适用说明中精确白名单布局的黑鲨 2 Pro DLT-A0。完整实机安装、首次启动和冷启动尚未完成整体验收，不作为稳定刷机版。** 下载后先校验文件，阅读[下载与校验](docs/downloads.md)和[安装说明](docs/installer-candidate.txt)。
+
 ## rc2 新增与当前边界
 
 - 显示启动检查交接、零字节写入保护、清理恢复和有限自动重试已持久化；20 项隔离测试、3 次服务启停与真实异常恢复通过。
@@ -66,6 +82,6 @@ python3 -m unittest discover -s tests -v
 
 ## 完整系统安装候选包
 
-已制作 `install-candidate.1` 的完整构件包，包含Ubuntu根系统、无原机密钥的启动模板、A/B/机内救援生成与安装工具，而不是1MiB源码压缩包。网盘下载链接待作者上传后补入。
+已制作 `install-candidate.1` 的完整构件包，包含Ubuntu根系统、无原机密钥的启动模板、A/B/机内救援生成与安装工具，而不是1MiB源码压缩包。下载入口见上方「系统安装包下载」。
 
 **它仍是安装候选版：完成了文件镜像生成、文件系统检查、离线身份清理和隔离SSH认证测试，尚未完成另一台目标手机从Fastboot安装到持久启动的整体验收。** 默认仅验证文件，实际候选安装有明确的额外参数门禁。支持范围、擦除/备份边界和操作步骤见 [安装说明](docs/installer-candidate.txt)，对应 [安装器源码](installer-src/README.md)。

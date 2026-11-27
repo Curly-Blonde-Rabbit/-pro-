@@ -57,4 +57,6 @@ workspace必须是全新的目录，里面会生成新用户私钥、Wi-Fi配置
 厂商硬件运行文件与发行版包保留其各自权利；源码输入和运行配置在sources/。源码存在不等于逐字节可重现构建已验收。
 
 仓库：https://github.com/Curly-Blonde-Rabbit/-pro-
-网盘链接待分享后补入仓库。
+123云盘：https://1832518705.share.123pan.cn/123pan/Be3vTd-muTah
+夸克网盘：https://pan.quark.cn/s/cb8cbe78ef3a
+准确文件名/大小/SHA-256见 docs/downloads.md。

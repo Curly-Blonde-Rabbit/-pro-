@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "version": "v1.0.0-rc2",
+  "installer_revision": "install-candidate.1",
+  "artifact": "blackshark2pro-linux-v1.0.0-rc2-install-candidate.1.zip",
+  "bytes": 572723212,
+  "sha256": "8c125c0f83cf461d47d8ad9d59821f2c1fdb077f8218db8ea837149e3a982e10",
+  "mirrors": [
+    {
+      "provider": "123pan",
+      "url": "https://1832518705.share.123pan.cn/123pan/Be3vTd-muTah"
+    },
+    {
+      "provider": "quark",
+      "url": "https://pan.quark.cn/s/cb8cbe78ef3a"
+    }
+  ],
+  "hardware_installation_tested": false,
+  "cloud_file_contents_download_verified": false
+}
